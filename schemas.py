@@ -1,48 +1,108 @@
 """
-Database Schemas
+Database Schemas for Gestor de Alta Performance com IA
 
-Define your MongoDB collection schemas here using Pydantic models.
-These schemas are used for data validation in your application.
-
-Each Pydantic model represents a collection in your database.
-Model name is converted to lowercase for the collection name:
-- User -> "user" collection
-- Product -> "product" collection
-- BlogPost -> "blogs" collection
+Each Pydantic model below represents a MongoDB collection. The collection
+name is the lowercase of the class name (e.g., Task -> "task").
 """
-
+from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
+from datetime import datetime, date
 
-# Example schemas (replace with your own):
-
+# Base user
 class User(BaseModel):
-    """
-    Users collection schema
-    Collection name: "user" (lowercase of class name)
-    """
     name: str = Field(..., description="Full name")
     email: str = Field(..., description="Email address")
-    address: str = Field(..., description="Address")
-    age: Optional[int] = Field(None, ge=0, le=120, description="Age in years")
-    is_active: bool = Field(True, description="Whether user is active")
+    avatar_url: Optional[str] = Field(None, description="Avatar image URL")
 
-class Product(BaseModel):
-    """
-    Products collection schema
-    Collection name: "product" (lowercase of class name)
-    """
-    title: str = Field(..., description="Product title")
-    description: Optional[str] = Field(None, description="Product description")
-    price: float = Field(..., ge=0, description="Price in dollars")
-    category: str = Field(..., description="Product category")
-    in_stock: bool = Field(True, description="Whether product is in stock")
+# Agenda / Calendar
+class Event(BaseModel):
+    user_id: str = Field(..., description="Owner user id")
+    title: str
+    description: Optional[str] = None
+    category: str = Field("personal", description="personal|professional|family|other")
+    start_time: datetime
+    end_time: datetime
+    location: Optional[str] = None
+    all_day: bool = False
 
-# Add your own schemas here:
-# --------------------------------------------------
+class FocusBlock(BaseModel):
+    user_id: str
+    title: str
+    start_time: datetime
+    end_time: datetime
+    objective: Optional[str] = None
 
-# Note: The Flames database viewer will automatically:
-# 1. Read these schemas from GET /schema endpoint
-# 2. Use them for document validation when creating/editing
-# 3. Handle all database operations (CRUD) directly
-# 4. You don't need to create any database endpoints!
+# Tasks
+class Task(BaseModel):
+    user_id: str
+    title: str
+    description: Optional[str] = None
+    scope: str = Field("personal", description="professional|personal|family|home")
+    labels: List[str] = []
+    priority: str = Field("medium", description="low|medium|high|urgent")
+    due_date: Optional[date] = None
+    completed: bool = False
+
+# Habits
+class Habit(BaseModel):
+    user_id: str
+    name: str
+    target_per_day: int = 1
+    done_today: int = 0
+
+# Goals
+class Goal(BaseModel):
+    user_id: str
+    title: str
+    horizon: str = Field("weekly", description="annual|quarterly|monthly|weekly")
+    progress: int = Field(0, ge=0, le=100)
+    actions: List[str] = []
+
+# Health
+class HealthLog(BaseModel):
+    user_id: str
+    type: str = Field("energy", description="energy|mood|workout|water|supplement")
+    value: float = 0
+    note: Optional[str] = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+# Nutrition
+class MealPlan(BaseModel):
+    user_id: str
+    date: date
+    meals: List[str] = []
+    objective: str = Field("energia", description="perda_peso|foco_mental|energia|bem_estar")
+    shopping_list: List[str] = []
+
+# Family / Home
+class FamilyItem(BaseModel):
+    user_id: str
+    type: str = Field("maintenance", description="maintenance|task|recurring_purchase|document|reminder")
+    title: str
+    due_date: Optional[date] = None
+    notes: Optional[str] = None
+
+# Contacts
+class Contact(BaseModel):
+    user_id: str
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+    birthday: Optional[date] = None
+
+# Notes
+class Note(BaseModel):
+    user_id: str
+    title: str
+    content: str
+    type: str = Field("note", description="note|gratitude|idea|reflection")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+# AI Requests (audit)
+class AIRequest(BaseModel):
+    user_id: str
+    kind: str
+    parameters: dict = {}
+    created_at: datetime = Field(default_factory=datetime.utcnow)
