@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from database import db, create_document, get_documents
+from database import db, create_document, get_documents, update_document
 from schemas import Task, Event, FocusBlock, Goal, HealthLog, MealPlan, FamilyItem, Contact, Note, Habit, AIRequest, User
 
 app = FastAPI(title="Gestor de Alta Performance com IA")
@@ -65,7 +65,7 @@ def test_database():
     return response
 
 
-# Generic create endpoints (per collection)
+# Generic create/list endpoints (per collection)
 @app.post("/tasks")
 def create_task(task: Task):
     _id = create_document("task", task)
@@ -91,6 +91,20 @@ def list_events(user_id: str, start: Optional[datetime] = None, end: Optional[da
         filt["start_time"] = {"$gte": start}
         filt["end_time"] = {"$lte": end}
     return get_documents("event", filt, limit=500)
+
+class EventUpdate(BaseModel):
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    title: Optional[str] = None
+    location: Optional[str] = None
+    category: Optional[str] = None
+
+@app.patch("/events/{event_id}")
+def update_event(event_id: str, payload: EventUpdate):
+    modified = update_document("event", event_id, {k: v for k, v in payload.model_dump().items() if v is not None})
+    if not modified:
+        raise HTTPException(status_code=404, detail="Event not found or unchanged")
+    return {"status": "ok", "id": event_id}
 
 @app.post("/focus-blocks")
 def create_focus_block(block: FocusBlock):
@@ -201,6 +215,62 @@ def ai_center(cmd: AICommand):
         return {"review": "Revisão mensal: progresso de 68% nos objetivos trimestrais. Sugestões: reforçar consistência em hábitos chave."}
 
     return {"message": "Pedido recebido. Em breve, respostas mais inteligentes com base nos teus dados."}
+
+
+# New focused AI endpoints
+class AIPrioritize(BaseModel):
+    user_id: str
+    context: Optional[str] = None
+
+class AIWeeklyPlan(BaseModel):
+    user_id: str
+    week_start: Optional[date] = None
+
+class AIGoalsReview(BaseModel):
+    user_id: str
+    horizon: Optional[str] = None
+
+@app.post("/ai/prioritize")
+def ai_prioritize(payload: AIPrioritize):
+    create_document("airequest", AIRequest(user_id=payload.user_id, kind="prioritize", parameters={"context": payload.context or ""}))
+    tasks = get_documents("task", {"user_id": payload.user_id, "completed": False}, limit=100)
+    # Very simple scoring by priority field then due_date
+    prio_weight = {"urgent": 4, "high": 3, "medium": 2, "low": 1}
+    def score(t):
+        return (
+            prio_weight.get((t.get("priority") or "medium").lower(), 2),
+            0 if not t.get("due_date") else (9999999 - int(datetime.combine(t.get("due_date"), datetime.min.time()).timestamp()))
+        )
+    ordered = sorted(tasks, key=score, reverse=True)
+    top = [{"_id": str(t.get("_id")), "title": t.get("title"), "priority": t.get("priority"), "due_date": t.get("due_date")} for t in ordered[:7]]
+    return {"suggested_order": top}
+
+@app.post("/ai/weekly-plan")
+def ai_weekly_plan(payload: AIWeeklyPlan):
+    start = payload.week_start or date.today()
+    events = get_documents("event", {"user_id": payload.user_id}, limit=200)
+    blocks = [
+        {
+            "day": (start + timedelta(days=i)).isoformat(),
+            "focus": ["Bloco de foco 09:00-10:30", "Revisão 16:00-16:30"],
+            "tips": "Reserva manhãs para deep work. Coloca reuniões depois das 14h."
+        }
+        for i in range(7)
+    ]
+    create_document("airequest", AIRequest(user_id=payload.user_id, kind="weekly_plan", parameters={"week_start": start.isoformat()}))
+    return {"week_start": start.isoformat(), "plan": blocks, "events_considered": len(events)}
+
+@app.post("/ai/goals-review")
+def ai_goals_review(payload: AIGoalsReview):
+    goals = get_documents("goal", {"user_id": payload.user_id}, limit=200)
+    if not goals:
+        return {"summary": "Sem objetivos registados ainda.", "actions": []}
+    avg = round(sum(int(g.get("progress") or 0) for g in goals) / max(1, len(goals)))
+    actions = []
+    for g in goals[:3]:
+        actions.append({"goal": g.get("title"), "next_actions": ["Definir ação clara para esta semana", "Agendar 2 blocos de foco", "Criar métrica de progresso"]})
+    create_document("airequest", AIRequest(user_id=payload.user_id, kind="goals_review", parameters={"horizon": payload.horizon or "all"}))
+    return {"average_progress": avg, "recommendations": actions}
 
 
 # Dashboard aggregates

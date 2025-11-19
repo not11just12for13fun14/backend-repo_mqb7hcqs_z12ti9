@@ -9,7 +9,7 @@ from pymongo import MongoClient
 from datetime import datetime, timezone
 import os
 from dotenv import load_dotenv
-from typing import Union
+from typing import Union, List, Dict, Any, Optional
 from pydantic import BaseModel
 
 # Load environment variables from .env file
@@ -43,13 +43,41 @@ def create_document(collection_name: str, data: Union[BaseModel, dict]):
     result = db[collection_name].insert_one(data_dict)
     return str(result.inserted_id)
 
+
+def _normalize_docs(docs_cursor) -> List[Dict[str, Any]]:
+    """Convert MongoDB docs to JSON-serializable dicts (ObjectId -> str)."""
+    out: List[Dict[str, Any]] = []
+    try:
+        from bson.objectid import ObjectId as _OID
+    except Exception:
+        _OID = None
+    for d in docs_cursor:
+        d = dict(d)
+        _id = d.get("_id")
+        if _OID is not None and isinstance(_id, _OID):
+            d["_id"] = str(_id)
+        elif _id is not None:
+            d["_id"] = str(_id)
+        out.append(d)
+    return out
+
+
 def get_documents(collection_name: str, filter_dict: dict = None, limit: int = None):
-    """Get documents from collection"""
+    """Get documents from collection and normalize for JSON responses"""
     if db is None:
         raise Exception("Database not available. Check DATABASE_URL and DATABASE_NAME environment variables.")
-    
     cursor = db[collection_name].find(filter_dict or {})
     if limit:
         cursor = cursor.limit(limit)
-    
-    return list(cursor)
+    return _normalize_docs(cursor)
+
+
+def update_document(collection_name: str, doc_id: str, updates: dict) -> Optional[int]:
+    """Update a document by _id with provided updates; returns modified count"""
+    if db is None:
+        raise Exception("Database not available. Check DATABASE_URL and DATABASE_NAME environment variables.")
+    from bson.objectid import ObjectId
+    updates = updates.copy()
+    updates['updated_at'] = datetime.now(timezone.utc)
+    res = db[collection_name].update_one({"_id": ObjectId(doc_id)}, {"$set": updates})
+    return res.modified_count
