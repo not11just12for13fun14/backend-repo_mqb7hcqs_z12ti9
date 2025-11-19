@@ -43,18 +43,19 @@ def login(payload: LoginRequest):
     # For demo purposes, we use email as user_id token
     user_id = payload.email
     # Create user if not exists
-    existing = db["user"].find_one({"email": payload.email}) if db else None
-    if not existing and db:
-        create_document("user", {"name": payload.name or payload.email.split("@")[0], "email": payload.email})
-    return LoginResponse(token=user_id, user_id=user_id, name=(payload.name or existing.get("name") if existing else payload.email.split("@")[0]))
+    existing = db["user"].find_one({"email": payload.email}) if db is not None else None
+    if existing is None and db is not None:
+        create_document("user", {"name": (payload.name or payload.email.split("@")[0]), "email": payload.email})
+    resolved_name = payload.name or (existing.get("name") if isinstance(existing, dict) else None) or payload.email.split("@")[0]
+    return LoginResponse(token=user_id, user_id=user_id, name=resolved_name)
 
 
 # Helper to ensure db
 @app.get("/test")
 def test_database():
-    response = {"backend": "running", "db": bool(db)}
+    response = {"backend": "running", "db": (db is not None)}
     try:
-        if db:
+        if db is not None:
             response["collections"] = db.list_collection_names()
             response["db_status"] = "connected"
         else:
